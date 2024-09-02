@@ -77,7 +77,22 @@ bf_years.coord('longitude').guess_bounds()
 iris.save(bf_years, '/data/cr1/cburton/GFED/GFED4s_AnnualTotalBA_1997-2016.nc')
 '''    
 
+
 ### Second read in data and plot maps
+date = iris.Constraint(time=lambda cell: 2001 <= cell.point.year <= 2014)
+
+def PrepareData(model, obs):
+    cs_new = iris.coord_systems.GeogCS(6371229.)
+    obs.coord('latitude').coord_system = cs_new
+    obs.coord('longitude').coord_system = cs_new
+    model.coord('latitude').coord_system = cs_new
+    model.coord('longitude').coord_system = cs_new
+    obs = obs.regrid(model, iris.analysis.Linear())
+    obs.units = cf_units.Unit('%')
+    model.units = cf_units.Unit('%')
+    obs.rename('burntFractionAll')
+    model.rename('burntFractionAll')
+    return model, obs
 
 ### UKESM ###
 folder = '/scratch/cburton/scratch/OptimESM/'
@@ -90,52 +105,85 @@ ens3 = iris.load_cube(folder+'da916a.py*.pp', var_constraint)
 ens4 = iris.load_cube(folder+'da917a.py*.pp', var_constraint)
 IceMean = (ens1+ens2+ens3+ens4)/4
 
-#Without evolving ice sheets
+#Without evolving ice sheets (not currently used)
 ensA = iris.load_cube(folder+'cy690a.py*.pp', var_constraint)
 ensB = iris.load_cube(folder+'cy691a.py*.pp', var_constraint)
 ensC = iris.load_cube(folder+'cy692a.py*.pp', var_constraint)
 ensD = iris.load_cube(folder+'cy693a.py*.pp', var_constraint)
 NoIceMean = (ensA+ensB+ensC+ensD)/4
 
-IceMean = IceMean.collapsed('time', iris.analysis.MEAN)*86400*365*100
-NoIceMean = NoIceMean.collapsed('time', iris.analysis.MEAN)*86400*365*100
+UKESM = IceMean.extract(date)*86400*365*100 
+UKESM = UKESM.collapsed('time', iris.analysis.MEAN)  
+NoIceMean = NoIceMean.extract(date)*86400*365*100   
 
-date = iris.Constraint(time=lambda cell: 2001 <= cell.point.year <= 2014)
+
+var_constraint = iris.Constraint(name="burntFractionAll")
+### CNRM ###
+CNRM = iris.load_cube(folder+'burntFractionAll*CNRM-ESM2-1*.nc', var_constraint)
+CNRM = CNRM.extract(date)   
+iris.coord_categorisation.add_year(CNRM, 'time', name='year')
+CNRM = CNRM.aggregated_by(['year'],iris.analysis.SUM)
+CNRM = CNRM.collapsed('time', iris.analysis.MEAN)  
+
+### ECEarth ###
+ECEarth2 = iris.load(folder+'burntFractionAll*EC-Earth3*r3i1p1f1*.nc', var_constraint)
+for cube in ECEarth2:
+    cube.attributes = None
+ECEarth2 = ECEarth2.concatenate_cube()
+ECEarth3 = iris.load(folder+'burntFractionAll*EC-Earth3*r5i1p1f1*.nc', var_constraint)
+for cube in ECEarth3:
+    cube.attributes = None
+ECEarth3 = ECEarth3.concatenate_cube()
+
+ECEarth = (ECEarth2 + ECEarth3)/2
+ECEarth = ECEarth.extract(date)  
+iris.coord_categorisation.add_year(ECEarth, 'time', name='year')
+ECEarth = ECEarth.aggregated_by(['year'],iris.analysis.SUM)
+ECEarth = ECEarth.collapsed('time', iris.analysis.MEAN)  
 
 ### GFED4 ###
 GFED4 = iris.load_cube('/data/cr1/cburton/GFED/GFED4s_AnnualTotalBA_1997-2016.nc')
-GFED4 = GFED4.extract(date)   
-GFED4 = GFED4.collapsed('time', iris.analysis.MEAN)*100
-GFED4 = GFED4.regrid(IceMean, iris.analysis.Linear())
+GFED4 = GFED4.extract(date)*100   
+GFED4 = GFED4.collapsed('time', iris.analysis.MEAN)  
+UKESM,GFED4 = PrepareData(UKESM,GFED4) 
 
 ### GFED5 ###
 GFED5 = iris.load_cube('/data/cr1/cburton/GFED/GFED5/GFED5_Burned_Percentage.nc')
 GFED5 = GFED5.extract(date)   
 iris.coord_categorisation.add_year(GFED5, 'time', name='year')
 GFED5 = GFED5.aggregated_by(['year'],iris.analysis.SUM)
-GFED5 = GFED5.collapsed('time', iris.analysis.MEAN)
-GFED5 = GFED5.regrid(IceMean, iris.analysis.Linear())
+GFED5 = GFED5.collapsed('time', iris.analysis.MEAN)  
+UKESM,GFED5 = PrepareData(UKESM,GFED5) 
 
 ### FireCCI ###
 CCI = iris.load_cube('/data/cr1/cburton/FireCCI/2001-2016_Annual_BAFrac_CB.nc')
-CCI = CCI.extract(date)   
-CCI = CCI.collapsed('time', iris.analysis.MEAN)*100
-cs_new = iris.coord_systems.GeogCS(6371229.)
-CCI.coord('latitude').coord_system = cs_new
-CCI.coord('longitude').coord_system = cs_new
-IceMean.coord('latitude').coord_system = cs_new
-IceMean.coord('longitude').coord_system = cs_new
-CCI = CCI.regrid(IceMean, iris.analysis.Linear())
+CCI = CCI.extract(date)*100
+CCI = CCI.collapsed('time', iris.analysis.MEAN)  
+UKESM,CCI = PrepareData(UKESM,CCI) 
 
 #Bias
-diff4 = IceMean - GFED4
-diff5 = GFED5.copy()
-diff5.data = IceMean.data - GFED5.data
+diff1 = UKESM - GFED4
+diff2 = GFED5.copy()
+diff2.data = UKESM.data - GFED5.data
 
-crs_latlon = ccrs.PlateCarree()#
+CNRM,GFED4 = PrepareData(CNRM,GFED4)
+diff3 = CNRM - GFED4
+CNRM,GFED5 = PrepareData(CNRM,GFED5)
+diff4 = GFED5.copy()
+diff4.data = CNRM.data - GFED5.data
+
+ECEarth,GFED4 = PrepareData(ECEarth,GFED4)
+diff5 = GFED4.copy()
+diff5.data = ECEarth.data - GFED4.data
+ECEarth,GFED5 = PrepareData(ECEarth,GFED5)
+diff6 = GFED5.copy()
+diff6.data = ECEarth.data - GFED5.data
+
+
+############### Make plots ###################
+crs_latlon = ccrs.PlateCarree()
 def make_plot(projection_name, projection_crs):
 
-###############
     fig = plt.figure()
 
     jet = plt.get_cmap('jet')
@@ -146,41 +194,77 @@ def make_plot(projection_name, projection_crs):
     levels = MaxNLocator(nbins=10).tick_values=tick_values
     norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
   
-    ax = plt.subplot(2,3,1)
+    ax = plt.subplot(4,3,1)
     iplt.pcolormesh(CCI, cmap=cmap, norm=norm )
     plt.gca().coastlines()
     plt.title("FireCCI", fontsize=12)
     plt.colorbar(orientation='horizontal')
 
-    ax = plt.subplot(2,3,2)
+    ax = plt.subplot(4,3,2)
     iplt.pcolormesh(GFED4, cmap=cmap, norm=norm )
     plt.gca().coastlines()
     plt.title("GFED4.1s", fontsize=12)
     plt.colorbar(orientation='horizontal')
 
-    ax = plt.subplot(2,3,3)
+    ax = plt.subplot(4,3,3)
     iplt.pcolormesh(GFED5, cmap=cmap, norm=norm )
     plt.gca().coastlines()
     plt.title("GFED5", fontsize=12)
     plt.colorbar(orientation='horizontal')
     
-    ax = plt.subplot(2,3,4)
-    iplt.pcolormesh(IceMean, cmap=cmap, norm=norm )
+    ax = plt.subplot(4,3,4)
+    iplt.pcolormesh(UKESM, cmap=cmap, norm=norm )
     plt.gca().coastlines()
     plt.title("UKESM", fontsize=12)
-    plt.colorbar(orientation='horizontal', label='Burned Fraction (% yr$^{-1}$)')
+    plt.colorbar(orientation='horizontal')
 
-    ax = plt.subplot(2,3,5)
-    mesh = iplt.pcolormesh(diff4, cmap='RdBu_r', vmin=-20, vmax=20 )
+    ax = plt.subplot(4,3,5)
+    mesh = iplt.pcolormesh(diff1, cmap='RdBu_r', vmin=-20, vmax=20 )
     plt.gca().coastlines()
     plt.title("Difference UKESM-GFED4.1s", fontsize=12)
     plt.colorbar(orientation='horizontal')
 
-    ax = plt.subplot(2,3,6)
-    mesh = iplt.pcolormesh(diff5, cmap='RdBu_r', vmin=-20, vmax=20 )
+    ax = plt.subplot(4,3,6)
+    mesh = iplt.pcolormesh(diff2, cmap='RdBu_r', vmin=-20, vmax=20 )
     plt.gca().coastlines()
     plt.title("Difference UKESM-GFED5", fontsize=12)
     plt.colorbar(orientation='horizontal')
+
+    ax = plt.subplot(4,3,7)
+    iplt.pcolormesh(CNRM, cmap=cmap, norm=norm )
+    plt.gca().coastlines()
+    plt.title("CNRM", fontsize=12)
+    plt.colorbar(orientation='horizontal')
+
+    ax = plt.subplot(4,3,8)
+    mesh = iplt.pcolormesh(diff3, cmap='RdBu_r', vmin=-20, vmax=20 )
+    plt.gca().coastlines()
+    plt.title("Difference CNRM-GFED4.1s", fontsize=12)
+    plt.colorbar(orientation='horizontal')
+
+    ax = plt.subplot(4,3,9)
+    mesh = iplt.pcolormesh(diff4, cmap='RdBu_r', vmin=-20, vmax=20 )
+    plt.gca().coastlines()
+    plt.title("Difference CNRM-GFED5", fontsize=12)
+    plt.colorbar(orientation='horizontal')
+
+    ax = plt.subplot(4,3,10)
+    iplt.pcolormesh(ECEarth, cmap=cmap, norm=norm )
+    plt.gca().coastlines()
+    plt.title("EC-Earth", fontsize=12)
+    plt.colorbar(orientation='horizontal', label='Burned Fraction (% yr$^{-1}$)')
+
+    ax = plt.subplot(4,3,11)
+    mesh = iplt.pcolormesh(diff5, cmap='RdBu_r', vmin=-20, vmax=20 )
+    plt.gca().coastlines()
+    plt.title("Difference EC-Earth-GFED4.1s", fontsize=12)
+    plt.colorbar(orientation='horizontal', label='Difference in Burned Fraction (% yr$^{-1}$)')
+
+    ax = plt.subplot(4,3,12)
+    mesh = iplt.pcolormesh(diff6, cmap='RdBu_r', vmin=-20, vmax=20 )
+    plt.gca().coastlines()
+    plt.title("Difference EC-Earth-GFED5", fontsize=12)
+    plt.colorbar(orientation='horizontal', label='Difference in Burned Fraction (% yr$^{-1}$)')
 
     plt.suptitle('2001-2014 Burned Area')
     plt.show()

@@ -83,6 +83,29 @@ exit()
 
 
 ### Second read in data and plot maps
+date = iris.Constraint(time=lambda cell: 2001 <= cell.point.year <= 2014)
+
+def PrepareData(model, obs):
+    cs_new = iris.coord_systems.GeogCS(6371229.)
+    obs.coord('latitude').coord_system = cs_new
+    obs.coord('longitude').coord_system = cs_new
+    model.coord('latitude').coord_system = cs_new
+    model.coord('longitude').coord_system = cs_new
+    obs = obs.regrid(model, iris.analysis.Linear())
+    obs.units = cf_units.Unit('kg/m2/s')
+    model.units = cf_units.Unit('kg/m2/s')
+    obs.rename('fFire')
+    model.rename('fFire')
+    return model, obs
+
+def CollapseToTimeseries(cube):
+    coords = ('longitude', 'latitude')
+    for coord in coords:
+        if not cube.coord(coord).has_bounds():
+            cube.coord(coord).guess_bounds()
+    area = iris.analysis.cartography.area_weights(cube, normalize=False)
+    cube = cube.collapsed(coords, iris.analysis.SUM, weights=area)/1E12
+    return cube
 
 ### UKESM ###
 folder = '/scratch/cburton/scratch/OptimESM/'
@@ -93,39 +116,46 @@ ens1 = iris.load_cube(folder+'cy623a.py*.pp', var_constraint)
 ens2 = iris.load_cube(folder+'da914a.py*.pp', var_constraint)
 ens3 = iris.load_cube(folder+'da916a.py*.pp', var_constraint)
 ens4 = iris.load_cube(folder+'da917a.py*.pp', var_constraint)
-IceMean = (ens1+ens2+ens3+ens4)/4
+UKESM = ((ens1+ens2+ens3+ens4)/4)*86400*365
 
-#Without evolving ice sheets
-ensA = iris.load_cube(folder+'cy690a.py*.pp', var_constraint)
-ensB = iris.load_cube(folder+'cy691a.py*.pp', var_constraint)
-ensC = iris.load_cube(folder+'cy692a.py*.pp', var_constraint)
-ensD = iris.load_cube(folder+'cy693a.py*.pp', var_constraint)
-NoIceMean = (ensA+ensB+ensC+ensD)/4
+var_constraint = iris.Constraint(name="fFire")
+### CNRM ###
+CNRM = iris.load_cube(folder+'fFire*CNRM-ESM2-1*.nc', var_constraint)
+CNRM = CNRM.extract(date)   
+iris.coord_categorisation.add_year(CNRM, 'time', name='year')
+CNRM = CNRM.aggregated_by(['year'],iris.analysis.SUM)*1E6
+CNRM,UKESM = PrepareData(CNRM,UKESM)
+CNRM = CollapseToTimeseries(CNRM)
 
-coords = ('longitude', 'latitude')
-for coord in coords:
-    if not IceMean.coord(coord).has_bounds():
-        IceMean.coord(coord).guess_bounds()
-area = iris.analysis.cartography.area_weights(IceMean, normalize=False)
+### ECEarth ###
+ECEarth2 = iris.load(folder+'fFire*EC-Earth3*r3i1p1f1*.nc', var_constraint)
+for cube in ECEarth2:
+    cube.attributes = None
+ECEarth2 = ECEarth2.concatenate_cube()
+ECEarth2 = ECEarth2.extract(date)  
 
-date = iris.Constraint(time=lambda cell: 2001 <= cell.point.year <= 2014)
+ECEarth3 = iris.load(folder+'fFire*EC-Earth3*r5i1p1f1*.nc', var_constraint)
+for cube in ECEarth3:
+    cube.attributes = None
+ECEarth3 = ECEarth3.concatenate_cube()
+ECEarth3 = ECEarth3.extract(date)  
+
+ECEarth = (ECEarth2 + ECEarth3)/2
+iris.coord_categorisation.add_year(ECEarth, 'time', name='year')
+ECEarth = ECEarth.aggregated_by(['year'],iris.analysis.SUM)*1E6
+ECEarth,UKESM = PrepareData(ECEarth,UKESM)
+ECEarth = CollapseToTimeseries(ECEarth)
 
 ### GFED4 ###
 GFED4 = iris.load_cube('/data/cr1/cburton/GFED/GFED4s_AnnualTotalEmissions_1997-2016.nc')
 GFED4 = GFED4.extract(date)   
-GFED4 = GFED4.regrid(IceMean, iris.analysis.Linear())
-GFED4 = GFED4.collapsed(coords, iris.analysis.SUM, weights=area)/1E15
-
+GFED4 = GFED4.regrid(UKESM, iris.analysis.Linear())
+GFED4 =  CollapseToTimeseries(GFED4)/1000
 
 ### Get GFAS data
 var_constraint = iris.Constraint(cube_func=lambda x: x.var_name == 'cfire')
 GFAS = iris.load_cube('/data/cr1/cburton/GFAS/GFAS.nc', var_constraint)*86400*360 
-cs_new = iris.coord_systems.GeogCS(6371229.)
-GFAS.coord('latitude').coord_system = cs_new
-GFAS.coord('longitude').coord_system = cs_new
-IceMean.coord('latitude').coord_system = cs_new
-IceMean.coord('longitude').coord_system = cs_new
-GFAS = GFAS.regrid(IceMean, iris.analysis.Linear())
+GFAS,UKESM = PrepareData(GFAS,UKESM)
 years = range(2000, 2014)
 F = []
 for year in years:
@@ -145,16 +175,16 @@ for f in F:
 xa = tuple(years)
 GFAS = tuple(f.data for f in F_sum)
 
-
-IceMean = IceMean.collapsed(coords, iris.analysis.SUM, weights=area)*86400*365/1E12
-NoIceMean = NoIceMean.collapsed(coords, iris.analysis.SUM, weights=area)*86400*365/1E12
-
+UKESM =  CollapseToTimeseries(UKESM)
 
 ###Make plot
 x = np.arange(2001,2015)
 plt.plot(x, GFED4.data, color='black', label='GFED4.1s')
 plt.plot(xa, GFAS, color='blue', label='GFAS')
-plt.plot(x, IceMean.data, color='Red', label='UKESM')
+plt.plot(x, UKESM.data, color='Red', label='UKESM')
+plt.plot(x, CNRM.data, color='Green', label='CNRM')
+plt.plot(x, ECEarth.data, color='Orange', label='EC-Earth')
+
 plt.ylabel('GtC')
 plt.xlabel('Years')
 plt.legend(loc='best')
