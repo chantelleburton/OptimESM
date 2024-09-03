@@ -124,8 +124,11 @@ CNRM = iris.load_cube(folder+'fFire*CNRM-ESM2-1*.nc', var_constraint)
 CNRM = CNRM.extract(date)   
 iris.coord_categorisation.add_year(CNRM, 'time', name='year')
 CNRM = CNRM.aggregated_by(['year'],iris.analysis.SUM)*1E6
+LandFrac = iris.load_cube('/scratch/cburton/scratch/OptimESM/sftlf_fx_CNRM-ESM2-1_esm-hist_r1i1p2f2_gr.nc', 'sftlf')/100
+CNRM = CNRM*LandFrac
 CNRM,UKESM = PrepareData(CNRM,UKESM)
 CNRM = CollapseToTimeseries(CNRM)
+
 
 ### ECEarth ###
 ECEarth2 = iris.load(folder+'fFire*EC-Earth3*r3i1p1f1*.nc', var_constraint)
@@ -143,6 +146,8 @@ ECEarth3 = ECEarth3.extract(date)
 ECEarth = (ECEarth2 + ECEarth3)/2
 iris.coord_categorisation.add_year(ECEarth, 'time', name='year')
 ECEarth = ECEarth.aggregated_by(['year'],iris.analysis.SUM)*1E6
+LandFrac = iris.load_cube('/scratch/cburton/scratch/OptimESM/sftlf_fx_EC-Earth3-ESM-1_esm-hist_r5i1p1f1_gr.nc', 'sftlf')/100
+ECEarth.data = ECEarth.data * LandFrac.data
 ECEarth,UKESM = PrepareData(ECEarth,UKESM)
 ECEarth = CollapseToTimeseries(ECEarth)
 
@@ -154,7 +159,7 @@ GFED4 =  CollapseToTimeseries(GFED4)/1000
 
 ### Get GFAS data
 var_constraint = iris.Constraint(cube_func=lambda x: x.var_name == 'cfire')
-GFAS = iris.load_cube('/data/cr1/cburton/GFAS/GFAS.nc', var_constraint)*86400*360 
+GFAS = iris.load_cube('/data/cr1/cburton/GFAS/GFAS.nc', var_constraint)*86400*365 
 GFAS,UKESM = PrepareData(GFAS,UKESM)
 years = range(2000, 2014)
 F = []

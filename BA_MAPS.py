@@ -105,13 +105,14 @@ ens3 = iris.load_cube(folder+'da916a.py*.pp', var_constraint)
 ens4 = iris.load_cube(folder+'da917a.py*.pp', var_constraint)
 IceMean = (ens1+ens2+ens3+ens4)/4
 
-#Without evolving ice sheets (not currently used)
+#Without evolving ice sheets (not currently used, just here for reference)
 ensA = iris.load_cube(folder+'cy690a.py*.pp', var_constraint)
 ensB = iris.load_cube(folder+'cy691a.py*.pp', var_constraint)
 ensC = iris.load_cube(folder+'cy692a.py*.pp', var_constraint)
 ensD = iris.load_cube(folder+'cy693a.py*.pp', var_constraint)
 NoIceMean = (ensA+ensB+ensC+ensD)/4
 
+#Multiply by sec and days in a year, and 100 to convert frac to %. Find mean over 2001-2014
 UKESM = IceMean.extract(date)*86400*365*100 
 UKESM = UKESM.collapsed('time', iris.analysis.MEAN)  
 NoIceMean = NoIceMean.extract(date)*86400*365*100   
@@ -119,13 +120,16 @@ NoIceMean = NoIceMean.extract(date)*86400*365*100
 
 var_constraint = iris.Constraint(name="burntFractionAll")
 ### CNRM ###
+#Convert daily % to monthly % (as advised by Roland), and aggregate to get annual total. Find mean over 2001-2014
 CNRM = iris.load_cube(folder+'burntFractionAll*CNRM-ESM2-1*.nc', var_constraint)
 CNRM = CNRM.extract(date)   
 iris.coord_categorisation.add_year(CNRM, 'time', name='year')
-CNRM = CNRM.aggregated_by(['year'],iris.analysis.SUM)
+CNRM = CNRM.aggregated_by(['year'],iris.analysis.SUM)*365/12
 CNRM = CNRM.collapsed('time', iris.analysis.MEAN)  
 
 ### ECEarth ###
+# Aggregate monthly data to get annual total. Find mean over 2001-2014
+# Only using 2 ensemble members for now. r1i1p1f1 is missing 2010-2013, and data not yet available from Lund
 ECEarth2 = iris.load(folder+'burntFractionAll*EC-Earth3*r3i1p1f1*.nc', var_constraint)
 for cube in ECEarth2:
     cube.attributes = None
@@ -142,12 +146,14 @@ ECEarth = ECEarth.aggregated_by(['year'],iris.analysis.SUM)
 ECEarth = ECEarth.collapsed('time', iris.analysis.MEAN)  
 
 ### GFED4 ###
+# In fraction so multiply by 100 to convert to %
 GFED4 = iris.load_cube('/data/cr1/cburton/GFED/GFED4s_AnnualTotalBA_1997-2016.nc')
 GFED4 = GFED4.extract(date)*100   
 GFED4 = GFED4.collapsed('time', iris.analysis.MEAN)  
 UKESM,GFED4 = PrepareData(UKESM,GFED4) 
 
 ### GFED5 ###
+# Already in %
 GFED5 = iris.load_cube('/data/cr1/cburton/GFED/GFED5/GFED5_Burned_Percentage.nc')
 GFED5 = GFED5.extract(date)   
 iris.coord_categorisation.add_year(GFED5, 'time', name='year')
@@ -156,6 +162,7 @@ GFED5 = GFED5.collapsed('time', iris.analysis.MEAN)
 UKESM,GFED5 = PrepareData(UKESM,GFED5) 
 
 ### FireCCI ###
+# In fraction so multiply by 100 to convert to %
 CCI = iris.load_cube('/data/cr1/cburton/FireCCI/2001-2016_Annual_BAFrac_CB.nc')
 CCI = CCI.extract(date)*100
 CCI = CCI.collapsed('time', iris.analysis.MEAN)  

@@ -121,13 +121,17 @@ UKESM = IceMean.extract(date)*86400*365
 
 var_constraint = iris.Constraint(name="burntFractionAll")
 ### CNRM ###
+#Convert daily % to monthly % (as advised by Roland), and aggregate to get annual total. 
+#Need to divide land fraction by 100
 CNRM = iris.load_cube(folder+'burntFractionAll*CNRM-ESM2-1*.nc', var_constraint)
-CNRM = CNRM.extract(date)   
+CNRM = CNRM.extract(date)*365/12   
 iris.coord_categorisation.add_year(CNRM, 'time', name='year')
 CNRM = CNRM.aggregated_by(['year'],iris.analysis.SUM)/100
-
+LandFrac = iris.load_cube('/scratch/cburton/scratch/OptimESM/sftlf_fx_CNRM-ESM2-1_esm-hist_r1i1p2f2_gr.nc', 'sftlf')/100
+CNRM = CNRM*LandFrac
 
 ### ECEarth ###
+#Need to divide land fraction by 100
 ECEarth2 = iris.load(folder+'burntFractionAll*EC-Earth3*r3i1p1f1*.nc', var_constraint)
 for cube in ECEarth2:
     cube.attributes = None
@@ -141,7 +145,8 @@ ECEarth = (ECEarth2 + ECEarth3)/2
 ECEarth = ECEarth.extract(date)  
 iris.coord_categorisation.add_year(ECEarth, 'time', name='year')
 ECEarth = ECEarth.aggregated_by(['year'],iris.analysis.SUM)/100
-
+LandFrac = iris.load_cube('/scratch/cburton/scratch/OptimESM/sftlf_fx_EC-Earth3-ESM-1_esm-hist_r5i1p1f1_gr.nc', 'sftlf')/100
+ECEarth.data = ECEarth.data * LandFrac.data
 
 ### GFED4 ###
 GFED4 = iris.load_cube('/data/cr1/cburton/GFED/GFED4s_AnnualTotalBA_1997-2016.nc')
