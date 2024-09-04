@@ -129,7 +129,11 @@ CNRM = CNRM.collapsed('time', iris.analysis.MEAN)
 
 ### ECEarth ###
 # Aggregate monthly data to get annual total. Find mean over 2001-2014
-# Only using 2 ensemble members for now. r1i1p1f1 is missing 2010-2013, and data not yet available from Lund
+# Only using 3 ensemble members for now. Data not yet available from Lund
+ECEarth1 = iris.load(folder+'burntFractionAll*EC-Earth3*r1i1p1f1*.nc', var_constraint)
+for cube in ECEarth1:
+    cube.attributes = None
+ECEarth1 = ECEarth1.concatenate_cube()
 ECEarth2 = iris.load(folder+'burntFractionAll*EC-Earth3*r3i1p1f1*.nc', var_constraint)
 for cube in ECEarth2:
     cube.attributes = None
@@ -139,7 +143,7 @@ for cube in ECEarth3:
     cube.attributes = None
 ECEarth3 = ECEarth3.concatenate_cube()
 
-ECEarth = (ECEarth2 + ECEarth3)/2
+ECEarth = (ECEarth1 + ECEarth2 + ECEarth3)/3
 ECEarth = ECEarth.extract(date)  
 iris.coord_categorisation.add_year(ECEarth, 'time', name='year')
 ECEarth = ECEarth.aggregated_by(['year'],iris.analysis.SUM)
@@ -259,21 +263,21 @@ def make_plot(projection_name, projection_crs):
     iplt.pcolormesh(ECEarth, cmap=cmap, norm=norm )
     plt.gca().coastlines()
     plt.title("EC-Earth", fontsize=12)
-    plt.colorbar(orientation='horizontal', label='Burned Fraction (% yr$^{-1}$)')
+    plt.colorbar(orientation='horizontal')
 
     ax = plt.subplot(4,3,11)
     mesh = iplt.pcolormesh(diff5, cmap='RdBu_r', vmin=-20, vmax=20 )
     plt.gca().coastlines()
     plt.title("Difference EC-Earth-GFED4.1s", fontsize=12)
-    plt.colorbar(orientation='horizontal', label='Difference in Burned Fraction (% yr$^{-1}$)')
+    plt.colorbar(orientation='horizontal')
 
     ax = plt.subplot(4,3,12)
     mesh = iplt.pcolormesh(diff6, cmap='RdBu_r', vmin=-20, vmax=20 )
     plt.gca().coastlines()
     plt.title("Difference EC-Earth-GFED5", fontsize=12)
-    plt.colorbar(orientation='horizontal', label='Difference in Burned Fraction (% yr$^{-1}$)')
+    plt.colorbar(orientation='horizontal')
 
-    plt.suptitle('2001-2014 Burned Area')
+    plt.suptitle('2001-2014 Annual Mean Burned Area Percentage')
     plt.show()
             
 def main():

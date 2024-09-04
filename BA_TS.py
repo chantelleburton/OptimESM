@@ -132,6 +132,10 @@ CNRM = CNRM*LandFrac
 
 ### ECEarth ###
 #Need to divide land fraction by 100
+ECEarth1 = iris.load(folder+'burntFractionAll*EC-Earth3*r1i1p1f1*.nc', var_constraint)
+for cube in ECEarth1:
+    cube.attributes = None
+ECEarth1 = ECEarth1.concatenate_cube()
 ECEarth2 = iris.load(folder+'burntFractionAll*EC-Earth3*r3i1p1f1*.nc', var_constraint)
 for cube in ECEarth2:
     cube.attributes = None
@@ -141,7 +145,7 @@ for cube in ECEarth3:
     cube.attributes = None
 ECEarth3 = ECEarth3.concatenate_cube()
 
-ECEarth = (ECEarth2 + ECEarth3)/2
+ECEarth = (ECEarth1 + ECEarth2 + ECEarth3)/3
 ECEarth = ECEarth.extract(date)  
 iris.coord_categorisation.add_year(ECEarth, 'time', name='year')
 ECEarth = ECEarth.aggregated_by(['year'],iris.analysis.SUM)/100

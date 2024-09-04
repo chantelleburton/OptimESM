@@ -131,6 +131,12 @@ CNRM = CollapseToTimeseries(CNRM)
 
 
 ### ECEarth ###
+ECEarth1 = iris.load(folder+'fFire*EC-Earth3*r1i1p1f1*.nc', var_constraint)
+for cube in ECEarth1:
+    cube.attributes = None
+ECEarth1 = ECEarth1.concatenate_cube()
+ECEarth1 = ECEarth1.extract(date)  
+
 ECEarth2 = iris.load(folder+'fFire*EC-Earth3*r3i1p1f1*.nc', var_constraint)
 for cube in ECEarth2:
     cube.attributes = None
@@ -143,7 +149,7 @@ for cube in ECEarth3:
 ECEarth3 = ECEarth3.concatenate_cube()
 ECEarth3 = ECEarth3.extract(date)  
 
-ECEarth = (ECEarth2 + ECEarth3)/2
+ECEarth = (ECEarth1 + ECEarth2 + ECEarth3)/3
 iris.coord_categorisation.add_year(ECEarth, 'time', name='year')
 ECEarth = ECEarth.aggregated_by(['year'],iris.analysis.SUM)*1E6
 LandFrac = iris.load_cube('/scratch/cburton/scratch/OptimESM/sftlf_fx_EC-Earth3-ESM-1_esm-hist_r5i1p1f1_gr.nc', 'sftlf')/100
