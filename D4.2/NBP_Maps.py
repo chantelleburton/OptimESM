@@ -1,0 +1,267 @@
+import sys
+import os
+import numpy as np
+import numpy.ma as ma
+import matplotlib.pyplot as plt
+import iris
+import iris.plot as iplt
+import iris.quickplot as qplt
+import iris.coord_categorisation
+import iris.analysis.cartography
+import matplotlib.dates as mdates
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import pylab as pl
+from iris.analysis.cartography import area_weights
+import iris.analysis.cartography
+from iris.coord_systems import GeogCS
+import cf_units
+from matplotlib.colors import BoundaryNorm, ListedColormap
+from iris.coords import DimCoord
+import cftime
+from scipy import stats
+import matplotlib.ticker as mticker
+
+# ── Global settings ───────────────────────────────────────────────────────────
+date           = iris.Constraint(time=lambda cell: 2000 <= cell.point.year <= 2014)
+ChoosePeriod   = 'Annual'
+DataFolder     = '/data/scratch/chantelle.burton/OptimESM/NBP/'
+var_constraint = iris.Constraint(name="nbp")
+
+
+# ── Model definitions ─────────────────────────────────────────────────────────
+MODELS = [
+    {
+        'label'   : 'CNRM',
+        'color'   : 'red',
+        'sign'    : 1,
+        'r1_file' : DataFolder + 'nbp_Lmon_CNRM-ESM2-1_esm-hist_r1i1p2f2_gr_185001-201412.nc',
+        'landfrac': DataFolder + 'sftlf_fx_CNRM-ESM2-1_esm-hist_r1i1p2f2_gr.nc',
+        'lf_name' : 'sftlf',
+        'ensemble': [],
+    },
+    {
+        'label'   : 'UKESM',
+        'color'   : 'black',
+        'sign'    : 1,
+        'r1_file' : DataFolder + 'nbp_Lmon_UKESM1-2-LL_esm-hist_r1i1p1f1_gn_195001-201412.nc',
+        'landfrac': DataFolder + 'qrparm.landfrac.nc',
+        'lf_name' : None,
+        'ensemble': [
+            DataFolder + 'nbp_Lmon_UKESM1-2-LL_esm-hist_r2i1p1f1_gn_195001-201412.nc',
+            DataFolder + 'nbp_Lmon_UKESM1-2-LL_esm-hist_r3i1p1f1_gn_195001-201412.nc',
+        ],
+    },
+    {
+        'label'   : 'IPSL',
+        'color'   : 'goldenrod',
+        'sign'    : -1,   # wrong sign — pers comms Lars & Paul @ Lund
+        'r1_file' : DataFolder + 'nbp_Lmon_IPSL-CM6-ESMCO2_esm-hist_r1i1p3f1_gr_195001-201412.nc',
+        'landfrac': DataFolder + 'sftlf_fx_CNRM-ESM2-1_esm-hist_r1i1p2f2_gr.nc',
+        'lf_name' : 'sftlf',
+        'ensemble': [
+            DataFolder + 'nbp_Lmon_IPSL-CM6-ESMCO2_esm-hist_r2i1p3f1_gr_195001-201412.nc',
+            DataFolder + 'nbp_Lmon_IPSL-CM6-ESMCO2_esm-hist_r3i1p3f1_gr_195001-201412.nc',
+            DataFolder + 'nbp_Lmon_IPSL-CM6-ESMCO2_esm-hist_r4i1p3f1_gr_195001-201412.nc',
+        ],
+    },
+    {
+        'label'   : 'EC-EARTH',
+        'color'   : 'purple',
+        'sign'    : 1,
+        'r1_file' : DataFolder + 'nbp_LPmon_EC-Earth3-ESM-1_esm-hist_r1i1p1f1_gr_20*.nc',
+        'landfrac': DataFolder + 'sftlf_fx_EC-Earth3-ESM-1_esm-hist_r5i1p1f1_gr.nc',
+        'lf_name' : 'sftlf',
+        'ensemble': [
+            DataFolder + "nbp_LPmon_EC-Earth3-ESM-1_esm-hist_r2i1p1f1_gr_*.nc",
+            DataFolder + "nbp_LPmon_EC-Earth3-ESM-1_esm-hist_r3i1p1f1_gr_*.nc",
+            DataFolder + "nbp_LPmon_EC-Earth3-ESM-1_esm-hist_r5i1p1f1_gr_*.nc"
+        ],
+    },
+]
+
+# ── Observations ──────────────────────────────────────────────────────────────
+def read_obs_nbp():
+    pwdin = "/data/users/eleanor.burke/obs_data/nbp"
+    cams_cube       = iris.load_cube(pwdin + "/cams/cams73_latest_co2_flux_surface_mm.nc")
+    carboscope_cube = iris.load_cube(pwdin + "/carboscope/r76nbetEXToc_v2025.flux_land.mon.nc")
+    gcp2024_cube    = iris.load_cube(pwdin + "/ct2022/GCP2024.flux1x1-monthly.processed.nc")
+    return cams_cube, carboscope_cube, gcp2024_cube
+
+OBS_CUBES  = read_obs_nbp()
+OBS_LABELS = ["CAMS", "CarboScope", "GCP2024"]
+OBS_STYLES = [dict(color=f"C{i}", ls='dashed') for i in range(len(OBS_LABELS))]
+
+# ── Helper functions ──────────────────────────────────────────────────────────
+def remove_duplicate_times(cube):
+    """Remove duplicate time points based on year coordinate."""
+    try:
+        year_points = cube.coord('year').points
+    except iris.exceptions.CoordinateNotFoundError:
+        year_points = cube.coord('time').points
+    _, unique_idx = np.unique(year_points, return_index=True)
+    return cube[np.sort(unique_idx)]
+
+def get_years(cube):
+    """Extract year values using the year coordinate if present."""
+    try:
+        return cube.coord('year').points.astype(int)
+    except iris.exceptions.CoordinateNotFoundError:
+        time_coord = cube.coord('time')
+        dates = time_coord.units.num2date(time_coord.points)
+        return np.array([d.year for d in dates])
+
+def load_and_preprocess(filepath, landfrac_file, lf_name, sign, is_glob=False):
+    """Load one NBP file (or glob), apply land-fraction, deduplicate, return cube."""
+    if is_glob:
+        cubelist = iris.load(filepath, var_constraint)
+        iris.util.equalise_attributes(cubelist)
+        cube = cubelist.concatenate_cube()
+    else:
+        cube = iris.load_cube(filepath, var_constraint)
+
+    cube = cube.extract(date)
+
+    if landfrac_file is not None:
+        if lf_name is not None:
+            lf = iris.load_cube(landfrac_file, lf_name) / 100.0
+        else:
+            lf = iris.load_cube(landfrac_file)
+        try:
+            cube = cube * lf
+        except Exception:
+            pass
+
+    iris.coord_categorisation.add_season_year(cube, 'time', name='year')
+    if ChoosePeriod == 'Annual':
+        cube = cube.aggregated_by(['year'], iris.analysis.SUM)
+
+    return cube * sign
+
+
+
+def load_mean_map(filepath, landfrac_file, lf_name, sign, is_glob=False):
+    """Load NBP, apply land fraction, return 2D time-mean in kg/m2/year."""
+    if is_glob:
+        cubelist = iris.load(filepath, var_constraint)
+        iris.util.equalise_attributes(cubelist)
+        cube = cubelist.concatenate_cube()
+    else:
+        cube = iris.load_cube(filepath, var_constraint)
+
+    cube = cube.extract(date)
+    cube = remove_duplicate_times(cube)
+    if landfrac_file is not None:
+        if lf_name is not None:
+            lf = iris.load_cube(landfrac_file, lf_name) / 100.0
+        else:
+            lf = iris.load_cube(landfrac_file)
+        try:
+            cube = cube * lf
+        except Exception:
+            pass
+
+    # Convert kg/m2/s → kg/m2/year then take time mean
+    cube = cube * 86400 * 365
+    cube = cube.collapsed('time', iris.analysis.MEAN)
+    cube = cube * sign
+    cube.units = cf_units.Unit('kg m-2 yr-1')
+    return cube
+
+
+def load_obs_mean_map(cube_in):
+    """Prepare an obs cube as a 2D time-mean in kg/m2/year."""
+    cube = cube_in.copy()
+    cube = cube.extract(date)
+    # Obs are typically already in kg/m2/s — convert to kg/m2/year
+    cube = cube * 86400 * 365
+    cube = cube.collapsed('time', iris.analysis.MEAN)
+    cube.units = cf_units.Unit('kg m-2 yr-1')
+    return cube
+
+
+def add_map_features(ax):
+    """Add coastlines and gridlines to a cartopy axes."""
+    ax.coastlines(linewidth=0.5, color='black')
+    ax.add_feature(cfeature.BORDERS, linewidth=0.3, edgecolor='grey')
+    gl = ax.gridlines(draw_labels=False, linewidth=0.3, color='grey', alpha=0.5)
+
+
+
+
+# ── Global maps ───────────────────────────────────────────────────────────────
+# Load all map data
+model_maps = []
+for mdef in MODELS:
+    is_glob = '*' in mdef['r1_file']
+    cube = load_mean_map(
+        mdef['r1_file'], mdef['landfrac'], mdef['lf_name'],
+        mdef['sign'], is_glob=is_glob
+    )
+    model_maps.append((mdef['label'], cube))
+
+obs_maps = []
+for ob_cube, ob_label in zip(OBS_CUBES, OBS_LABELS):
+    cube = load_obs_mean_map(ob_cube)
+    obs_maps.append((ob_label, cube))
+
+# Determine shared colour scale from all datasets combined
+all_data = np.concatenate([
+    np.ma.compressed(m[1].data) for m in model_maps + obs_maps
+])
+#vmax =  np.percentile(np.abs(all_data), 95)
+vmax = 0.15
+vmin = -vmax
+
+
+# Diverging colormap centred on zero (green=sink, Brown=source)
+cmap   = plt.cm.BrBG
+levels = np.linspace(vmin, vmax, 21)
+norm   = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+
+proj = ccrs.Robinson()
+
+fig2, axes2 = plt.subplots(
+    2, 4,
+    figsize=(20, 8),
+    subplot_kw={'projection': proj}
+)
+fig2.subplots_adjust(wspace=0.05, hspace=0.15)
+
+all_panels = model_maps + obs_maps   # 4 models + 3 obs = 7 panels
+# Hide the unused 8th panel (bottom-right)
+axes2[1, 3].set_visible(False)
+
+for idx, (title, cube) in enumerate(all_panels):
+    row = idx // 4
+    col = idx  % 4
+    ax  = axes2[row, col]
+
+    # Ensure bounds exist
+    for coord in ('longitude', 'latitude'):
+        if not cube.coord(coord).has_bounds():
+            cube.coord(coord).guess_bounds()
+
+    im = iplt.pcolormesh(cube, axes=ax, cmap=cmap, norm=norm)
+    add_map_features(ax)
+    ax.set_title(title, fontsize=11, fontweight='bold', pad=4)
+
+    # Label rows
+    if col == 0:
+        row_label = 'Models' if row == 0 else 'Observations'
+        ax.text(-0.05, 0.5, row_label, transform=ax.transAxes,
+                fontsize=11, fontweight='bold', va='center', ha='right',
+                rotation=90)
+
+# Shared colourbar spanning the full width
+cbar_ax = fig2.add_axes([0.15, 0.04, 0.70, 0.025])
+cb = fig2.colorbar(
+    plt.cm.ScalarMappable(norm=norm, cmap=cmap),
+    cax=cbar_ax, orientation='horizontal', extend='both'
+)
+cb.set_label('NBP (kg m$^{-2}$ yr$^{-1}$)', fontsize=11)
+cb.ax.tick_params(labelsize=9)
+
+fig2.suptitle('Mean NBP 2000–2014', fontsize=14, fontweight='bold', y=1.01)
+plt.savefig('NBP_Maps.png', dpi=150, bbox_inches='tight')
+plt.show()
